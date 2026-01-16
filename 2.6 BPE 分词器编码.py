@@ -1,0 +1,280 @@
+import json
+import os
+import regex
+from collections import defaultdict
+from typing import Dict, List, Tuple, Set, Iterable, Iterator
+
+# 配置参数（与训练时一致）
+config = {
+    "vocab_size": 10000,
+    "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
+    "num_processes": 8,
+    "sample_size": 22000,
+}
+
+# GPT-2预分词模式
+GPT2_SPLIT_PATTERN = (
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+)
+
+
+def gpt2_bytes_to_unicode_local() -> Dict[int, str]:
+    """字节到Unicode映射（与训练时一致）"""
+    bs = list(range(33, 127)) + list(range(161, 173)) + list(range(174, 256))
+    cs = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    return {b: chr(c) for b, c in zip(bs, cs)}
+
+
+class BPETokenizer:
+    def __init__(self, vocab_path: str, merges_path: str):
+        # 加载词汇表和合并规则
+        self.vocab = self._load_vocab(vocab_path)
+        self.merges = self._load_merges(merges_path)
+
+        # 创建反向映射(bytes -> ID)
+        self.bytes_to_id = {bytes_val: idx for idx, bytes_val in self.vocab.items()}
+
+        # 特殊token处理
+        self.special_tokens = config["special_tokens"]
+        self.special_to_id = {}
+        for token in self.special_tokens:
+            # TODO: 用  self.bytes_to_id而不是 self.vocab.items()
+            token_bytes = token.encode("utf-8")
+            for id_val, bytes_val in self.vocab.items():
+                if bytes_val == token_bytes:
+                    self.special_to_id[token] = id_val
+                    break
+
+        # 创建合并优先级映射
+        self.merges_priority_map = {pair: i for i, pair in enumerate(self.merges)}
+
+        # 字节到Unicode映射（用于编码）
+        self.bytes_to_unicode = gpt2_bytes_to_unicode_local()
+        self.unicode_to_bytes = {v: k for k, v in self.bytes_to_unicode.items()}
+
+    def _load_vocab(self, path: str) -> Dict[int, bytes]:
+        """加载词汇表文件"""
+        with open(path, "r", encoding="utf-8") as f:
+            vocab_str = json.load(f)
+        return {int(idx): token.encode("utf-8") for idx, token in vocab_str.items()}
+
+    def _load_merges(self, path: str) -> List[Tuple[bytes, bytes]]:
+        """加载合并规则文件"""
+        merges = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) == 2:
+                    merges.append((parts[0].encode("utf-8"), parts[1].encode("utf-8")))
+        return merges
+
+    def _bytes_to_unicode_str(self, byte_seq: bytes) -> str:
+        """将字节序列转换为Unicode字符串（使用训练时的映射）"""
+        return "".join(self.bytes_to_unicode[b] for b in byte_seq)
+
+    def _unicode_str_to_bytes(self, unicode_str: str) -> bytes:
+        """将Unicode字符串转换回字节序列"""
+        return b"".join(bytes([self.unicode_to_bytes[c]]) for c in unicode_str)
+
+    def _get_bpe_merges(self, piece: bytes) -> List[bytes]:
+        """
+        对字节片段进行BPE编码，返回字节列表
+        """
+        # 将字节转换为Unicode字符串（使用训练时的映射）
+        unicode_str = self._bytes_to_unicode_str(piece)
+        parts = [bytes([self.unicode_to_bytes[c]]) for c in unicode_str]
+
+        while len(parts) > 1:
+            # 查找所有可能的合并对
+            pairs = set()
+            for i in range(len(parts) - 1):
+                pair = (parts[i], parts[i + 1])
+                if pair in self.merges_priority_map:
+                    pairs.add(pair)
+
+            if not pairs:
+                break
+
+            # 找到优先级最高的合并对
+            best_pair = min(pairs, key=lambda pair: self.merges_priority_map[pair])
+
+            # 执行合并
+            new_parts = []
+            i = 0
+            while i < len(parts):
+                if i < len(parts) - 1 and (parts[i], parts[i + 1]) == best_pair:
+                    new_parts.append(parts[i] + parts[i + 1])
+                    i += 2
+                else:
+                    new_parts.append(parts[i])
+                    i += 1
+            parts = new_parts
+
+        return parts
+
+    def encode(self, text: str) -> List[int]:
+        """将文本编码为token ID序列"""
+        if not text:
+            return []
+
+        # 按特殊token分割文本
+        sorted_special_tokens = sorted(self.special_tokens, key=len, reverse=True)
+        special_token_pattern = "|".join(map(regex.escape, sorted_special_tokens))
+
+        if self.special_tokens:
+            chunks = regex.split(f"({special_token_pattern})", text)
+        else:
+            chunks = [text]
+
+        token_ids = []
+        for chunk in chunks:
+            if not chunk:
+                continue
+
+            if chunk in self.special_tokens:
+                # 处理特殊token
+                if chunk in self.special_to_id:
+                    token_ids.append(self.special_to_id[chunk])
+                else:
+                    # 回退到UNK或第一个特殊token
+                    if "<unk>" in self.special_to_id:
+                        token_ids.append(self.special_to_id["<unk>"])
+                    elif self.special_to_id:
+                        token_ids.append(list(self.special_to_id.values())[0])
+                    else:
+                        token_ids.append(0)
+            else:
+                # 预分词
+                words = regex.findall(GPT2_SPLIT_PATTERN, chunk, flags=regex.UNICODE)
+                for word in words:
+                    if not word:
+                        continue
+
+                    # 获取单词的BPE tokens
+                    word_bytes = word.encode("utf-8")
+                    pieces = self._get_bpe_merges(word_bytes)
+
+                    # 将每个piece转换为token ID
+                    for piece in pieces:
+                        if piece in self.bytes_to_id:
+                            token_ids.append(self.bytes_to_id[piece])
+                        else:
+                            # 处理未知token
+                            if "<unk>" in self.special_to_id:
+                                token_ids.append(self.special_to_id["<unk>"])
+                            elif self.special_to_id:
+                                token_ids.append(list(self.special_to_id.values())[0])
+                            else:
+                                token_ids.append(0)
+
+        return token_ids
+
+    def decode(self, token_ids: List[int]) -> str:
+        """将token ID序列解码为文本"""
+        byte_sequence = b""
+        for token_id in token_ids:
+            if token_id in self.vocab:
+                byte_sequence += self.vocab[token_id]
+            else:
+                # 处理无效token ID
+                if "<unk>" in self.special_to_id:
+                    unk_id = self.special_to_id["<unk>"]
+                    if unk_id in self.vocab:
+                        byte_sequence += self.vocab[unk_id]
+                elif self.special_tokens:
+                    # 使用第一个特殊token作为回退
+                    first_special_id = list(self.special_to_id.values())[0]
+                    if first_special_id in self.vocab:
+                        byte_sequence += self.vocab[first_special_id]
+
+        try:
+            return byte_sequence.decode("utf-8", errors="replace")
+        except UnicodeDecodeError:
+            # 极端情况下的回退处理
+            return byte_sequence.decode("latin1", errors="replace")
+
+    def tokenize(self, text: str) -> List[str]:
+        """将文本分词为token字符串（用于调试）"""
+        token_ids = self.encode(text)
+        tokens = []
+        for token_id in token_ids:
+            if token_id in self.vocab:
+                try:
+                    tokens.append(self.vocab[token_id].decode("utf-8"))
+                except UnicodeDecodeError:
+                    tokens.append(f"<BYTES:{self.vocab[token_id]}>")
+            else:
+                tokens.append("<INVALID_TOKEN>")
+        return tokens
+
+
+if __name__ == "__main__":
+    # 配置路径（与训练代码一致）
+    output_dir = "./out"
+    vocab_path = os.path.join(output_dir, "gpt2_vocab.json")
+    merges_path = os.path.join(output_dir, "gpt2_merges.txt")
+
+    # 验证文件存在
+    if not os.path.exists(vocab_path):
+        raise FileNotFoundError(f"词汇表文件不存在: {vocab_path}")
+    if not os.path.exists(merges_path):
+        raise FileNotFoundError(f"合并规则文件不存在: {merges_path}")
+
+    print("🚀 加载训练好的分词器...")
+    tokenizer = BPETokenizer(vocab_path, merges_path)
+    print("✅ 分词器加载成功!")
+
+    # 测试文本
+    test_texts = [
+        "Wow, that is great",
+        "you can eat",
+        "This is a test with special tokens: <|endoftext|>",
+    ]
+
+    # 添加特殊token测试
+    test_texts.append(f"Special token test: {config['special_tokens'][0]}")
+
+    print("\n🔍 开始分词器测试...")
+    for text in test_texts:
+        print(f"\n文本: {text}")
+
+        # 编码
+        token_ids = tokenizer.encode(text)
+        print(
+            f"编码 ({len(token_ids)} tokens): {token_ids[:20]}{'...' if len(token_ids) > 20 else ''}"
+        )
+
+        # 解码
+        decoded_text = tokenizer.decode(token_ids)
+        print(f"解码: {decoded_text}")
+
+        # 验证往返一致性
+        if text == decoded_text:
+            print("✅ 往返一致")
+        else:
+            print("⚠️ 往返不一致")
+            print(f"原始: {text}")
+            print(f"解码: {decoded_text}")
+
+            # 显示差异
+            for i, (orig_char, dec_char) in enumerate(zip(text, decoded_text)):
+                if orig_char != dec_char:
+                    print(
+                        f"位置 {i}: 原始 '{orig_char}' (U+{ord(orig_char):04X}) vs 解码 '{dec_char}' (U+{ord(dec_char):04X})"
+                    )
+                    break
+            else:
+                if len(text) != len(decoded_text):
+                    print(f"长度不同: 原始 {len(text)} vs 解码 {len(decoded_text)}")
+
+        # 显示前10个token
+        tokens = tokenizer.tokenize(text)[:10]
+        print(f"Token示例: {tokens}")
+
+    print("\n✅ 测试完成!")
