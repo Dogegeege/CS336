@@ -1,3 +1,8 @@
 build
-data/*
-out/*
+/data
+/out
+/.vscode
+/__pycache__
+/Experiments/__pycache__
+/Experiments/data
+/Experiments/logs

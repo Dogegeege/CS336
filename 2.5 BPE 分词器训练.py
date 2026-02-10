@@ -290,14 +290,17 @@ def run_train_bpe(
     sample_size: int = 22000,
     **kwargs,
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
-    """# 运行BPE训练流程 \n
-    input_path: 数据集路径，支持✅ 1. 字符串路径(str) ✅ 2. 路径对象(实现了 os.PathLike 协议的对象)\n
-    vocab_size: 目标词汇表大小\n
-    special_tokens: 特殊token列表\n
-    num_processes: 并行进程数\n
-    sample_size: 采样文档数量\n
-    返回: 词汇表和合并列表
+    """运行BPE训练流程
+    Args:
+        input_path: 数据集路径，支持✅ 1. 字符串路径(str) ✅ 2. 路径对象(实现了 os.PathLike 协议的对象)
+        vocab_size: 目标词汇表大小
+        special_tokens: 特殊token列表
+        num_processes: 并行进程数
+        sample_size: 采样文档数量
+    Returns:
+        vocab,merges: 词汇表和合并列表
     """
+
     # 参数验证
     base_vocab_size = 256 + len(special_tokens)
     if vocab_size < base_vocab_size:
