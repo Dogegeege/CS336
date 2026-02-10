@@ -285,7 +285,7 @@ try:
         # epoch 结束后写一次 epoch 完成日志
         log_message = f"Epoch {epoch} completed with loss: {loss.item():.6f}"
         print(log_message)
-        print(f"💾日志已保存至📁{log_file_path}\n")
+        print(f"💾日志已保存至📁 {log_file_path}\n")
         log_file.write(log_message + "\n")
         log_file.flush()
 
