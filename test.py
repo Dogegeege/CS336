@@ -1,19 +1,11 @@
-class Test:
-    def __init__(self):
-        print("hello")
+import torch
 
-    def __call__(self, *args, **kwds):
-        print("this is call")
+x = torch.tensor([[[1], [2], [3]], [[4], [5], [6]], [[7], [8], [9]]])
+y = torch.tensor([[1, 2]])
+z = torch.tensor([[[[4], [5], [6]], [[7], [8], [9]]]])
+print(x[y] == z)
+print(z.shape)
 
-
-class ClassFunc:
-    def __init__(self):
-        self.test = Test()
-
-    def f(self):
-        self.test()
-
-
-rest = ClassFunc()
-
-rest.f()
+print(torch.__version__)
+print(torch.version.cuda)
+print(torch.backends.cudnn.version())
