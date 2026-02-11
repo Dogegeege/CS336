@@ -2,8 +2,9 @@ import json
 import os
 import regex
 from collections import defaultdict
+from config import *
 from typing import Dict, List, Tuple, Set, Iterable, Iterator
-
+import base64
 
 # GPT-2预分词模式
 GPT2_SPLIT_PATTERN = (
@@ -29,14 +30,14 @@ def gpt2_bytes_to_unicode_local() -> Dict[int, str]:
 
 class BPETokenizer:
     def __init__(
-        self, config: Dict = None, vocab_path: str = "", merges_path: str = ""
+        self, config: Dict = None, vocab_path: str = None, merges_path: str = None
     ):
         # 加载词汇表和合并规则
-        if vocab_path == "":
+        if vocab_path is None:
             self.vocab = self._load_vocab(config["vocab_path"])
         else:
             self.vocab = self._load_vocab(vocab_path)
-        if merges_path == "":
+        if merges_path is None:
             self.merges = self._load_merges(config["merges_path"])
         else:
             self.merges = self._load_merges(merges_path)
@@ -51,7 +52,7 @@ class BPETokenizer:
 
         # *特殊token处理（更高效的查找）
         self.special_tokens = self.config["special_tokens"]
-        self.special_to_id = {}
+        self.special_to_id: Dict[str, int] = {}
         for token in self.special_tokens:
             token_bytes = token.encode("utf-8")
             if token_bytes in self.bytes_to_id:
@@ -70,7 +71,7 @@ class BPETokenizer:
     def _load_vocab(self, path: str) -> Dict[int, bytes]:
         """加载词汇表文件"""
         with open(path, "r", encoding="utf-8") as f:
-            vocab_str = json.load(f)
+            vocab_str: dict = json.load(f)
         return {int(idx): token.encode("utf-8") for idx, token in vocab_str.items()}
 
     def _load_merges(self, path: str) -> List[Tuple[bytes, bytes]]:
@@ -78,9 +79,15 @@ class BPETokenizer:
         merges = []
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                parts = line.strip().split()
-                if len(parts) == 2:
-                    merges.append((parts[0].encode("utf-8"), parts[1].encode("utf-8")))
+                line = line.strip()
+                if not line:
+                    continue
+            parts = line.split()
+            if len(parts) == 2:
+                b64_t1, b64_t2 = parts
+                t1 = base64.b64decode(b64_t1)
+                t2 = base64.b64decode(b64_t2)
+                merges.append((t1, t2))
         return merges
 
     def _bytes_to_unicode_str(self, byte_seq: bytes) -> str:
@@ -161,7 +168,7 @@ class BPETokenizer:
                         token_ids.append(0)
             else:
                 # 预分词（使用预编译正则）
-                words = WORD_RE.findall(chunk)
+                words: List[str] = WORD_RE.findall(chunk)
                 for word in words:
                     if not word:
                         continue
@@ -233,8 +240,8 @@ class BPETokenizer:
 
 
 if __name__ == "__main__":
-    # 配置路径（与训练代码一致）
-    output_dir = "./out"
+    # 配置路径
+    output_dir = "./Experiments/data"
     vocab_path = os.path.join(output_dir, "gpt2_vocab.json")
     merges_path = os.path.join(output_dir, "gpt2_merges.txt")
 
@@ -245,7 +252,7 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"合并规则文件不存在: {merges_path}")
 
     print("🚀 加载训练好的分词器...")
-    tokenizer = BPETokenizer(vocab_path, merges_path)
+    tokenizer = BPETokenizer(config, vocab_path, merges_path)
     print("✅ 分词器加载成功!")
 
     # 测试文本

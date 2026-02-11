@@ -66,6 +66,7 @@ class BPETokenizer:
 
     def _load_merges(self, path: str) -> List[Tuple[bytes, bytes]]:
         """加载合并规则文件"""
+        #!无法加载含有空格的tokens 比如" up on"
         merges = []
         with open(path, "r", encoding="utf-8") as f:
             for line in f:

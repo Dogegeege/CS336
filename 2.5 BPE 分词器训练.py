@@ -11,6 +11,7 @@ from typing import List, Tuple, Dict, DefaultDict, Any, Union
 import mmap
 import re
 from collections import defaultdict
+import base64
 
 # GPT-2预分词模式
 GPT2_SPLIT_PATTERN = (
@@ -519,12 +520,14 @@ if __name__ == "__main__":
         with open(vocab_path, "w", encoding="utf-8") as f:
             json.dump(vocab_str, f, ensure_ascii=False, indent=2)
 
-        # 2. 保存合并列表 (文本格式)
+        #!保存为.txt格式不安全
+        # 2. 保存合并列表 (base64格式)
         with open(merges_path, "w", encoding="utf-8") as f:
-            for merge in merges:
-                part1 = merge[0].decode("utf-8", errors="replace")
-                part2 = merge[1].decode("utf-8", errors="replace")
-                f.write(f"{part1} {part2}\n")
+            for t1, t2 in merges:
+                # 将bytes编码为Base64字符串（ASCII）
+                b64_t1 = base64.b64encode(t1).decode("ascii")
+                b64_t2 = base64.b64encode(t2).decode("ascii")
+                f.write(f"{b64_t1} {b64_t2}\n")
 
     # 在main函数中调用保存功能（在训练完成后）
     output_dir = "./out"  # 修改为您的输出目录
