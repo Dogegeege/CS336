@@ -1,4 +1,4 @@
-from BPEencoding import BPETokenizer as Tokenizer
+from BPETokenizer import BPETokenizer as Tokenizer
 from config import *
 from tqdm import tqdm
 

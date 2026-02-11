@@ -24,7 +24,7 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 config = {
     # 实验配置
     "experiment_name": f"tinystories_17M_{timestamp}",
-    "total_tokens_processed": 40000000,
+    "total_tokens_processed": 327680000,
     # 数据配置
     "train_data_path": "./data/TinyStoriesV2-GPT4-train.txt",
     "valid_data_path": "./data/TinyStoriesV2-GPT4-valid.txt",
