@@ -1,6 +1,7 @@
 import json
 import os
 import regex
+import base64
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Iterable, Iterator
 
@@ -66,13 +67,18 @@ class BPETokenizer:
 
     def _load_merges(self, path: str) -> List[Tuple[bytes, bytes]]:
         """加载合并规则文件"""
-        #!无法加载含有空格的tokens 比如" up on"
         merges = []
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                parts = line.strip().split()
-                if len(parts) == 2:
-                    merges.append((parts[0].encode("utf-8"), parts[1].encode("utf-8")))
+                line = line.strip()
+                if not line:
+                    continue
+            parts = line.split()
+            if len(parts) == 2:
+                b64_t1, b64_t2 = parts
+                t1 = base64.b64decode(b64_t1)
+                t2 = base64.b64decode(b64_t2)
+                merges.append((t1, t2))
         return merges
 
     def _bytes_to_unicode_str(self, byte_seq: bytes) -> str:
