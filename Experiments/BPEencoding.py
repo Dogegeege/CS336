@@ -12,15 +12,16 @@ import mmap
 import re
 from collections import defaultdict
 import base64
+import config as global_config
+from datasets import load_dataset
+from multiprocessing.pool import ThreadPool
+
 
 # GPT-2预分词模式
 GPT2_SPLIT_PATTERN = (
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 )
 MAX_PROCESSES = multiprocessing.cpu_count()
-
-# 全局变量用于多进程
-global_worker_byte_map = None
 
 
 def load_and_sample_data(
@@ -103,6 +104,13 @@ def pre_tokenize_document(
     return sequences
 
 
+def pre_tokenize_worker(
+    doc: str, bytes_to_unicode_map: Dict[int, str]
+) -> List[List[str]]:
+    """供 multiprocessing 调用的顶层函数"""
+    return pre_tokenize_document(doc, bytes_to_unicode_map)
+
+
 def parallel_pre_tokenize(
     documents: List[str], num_processes: int, bytes_to_unicode_map: Dict[int, str]
 ) -> List[List[str]]:
@@ -116,34 +124,19 @@ def parallel_pre_tokenize(
 
     from functools import partial
 
-    worker_func = partial(
-        pre_tokenize_document, bytes_to_unicode_map=bytes_to_unicode_map
-    )
-
-    # 注意：pre_tokenize_document 需要两个参数，但 partial 固定了第二个参数
-    # 或者定义一个接受单个参数的包装函数
-    def wrap(doc):
-        return pre_tokenize_document(doc, bytes_to_unicode_map)
+    # 绑定字节映射表，生成一个仅接收 doc 的可调用对象
+    worker = partial(pre_tokenize_worker, bytes_to_unicode_map=bytes_to_unicode_map)
 
     with multiprocessing.Pool(num_processes) as pool:
         results = list(
             tqdm(
-                pool.imap(wrap, documents, chunksize=50),
+                pool.imap(worker, documents, chunksize=50),
                 total=len(documents),
                 desc="预分词",
                 mininterval=1,
             )
         )
     return [seq for doc_sequences in results for seq in doc_sequences]
-
-
-def init_worker(byte_map: Dict[int, str]):
-    global global_worker_byte_map
-    global_worker_byte_map = byte_map
-
-
-def pre_tokenize_worker(doc: str) -> List[List[str]]:
-    return pre_tokenize_document(doc, global_worker_byte_map)
 
 
 class BPEIndex:
@@ -291,37 +284,60 @@ class BPEIndex:
         self.pair_positions[pair].append((seq_idx, pos))
 
 
+def prepare_documents_from_dataset(
+    dataset, split="train", sample_size=None, text_column="text"
+) -> List[str]:
+    """从 Hugging Face Dataset 中提取文档列表（极速采样版）"""
+    # 处理 DatasetDict
+    if isinstance(dataset, dict) and split in dataset:
+        data = dataset[split]
+    else:
+        data = dataset
+
+    # 检查列是否存在
+    if text_column not in data.column_names:
+        raise KeyError(f"数据集没有 '{text_column}' 列，可用列: {data.column_names}")
+
+    # ✅ 关键修复：直接用 len(data) 判断，不需要预先加载 texts
+    if sample_size is not None and sample_size < len(data):
+        indices = random.sample(range(len(data)), sample_size)
+        # ⚡ 极速采样：select 底层是 Arrow 切片，毫秒级
+        sampled = data.select(indices)
+        texts = sampled[text_column]  # 此时已经是 Python list
+        print(f"📚 从数据集 '{split}' 采样 {len(texts):,} 篇文档")
+    else:
+        texts = data[text_column]
+        if not isinstance(texts, list):
+            texts = list(texts)
+        print(f"📚 从数据集 '{split}' 加载全部 {len(texts):,} 篇文档")
+
+    return texts
+
+
 def run_train_bpe(
-    input_path: Union[str, os.PathLike],
+    documents: List[str],  # 直接接收文档列表
     vocab_size: int,
     special_tokens: List[str] = ["<|endoftext|>"],
     num_processes: int = 8,
-    sample_size: int = 22000,
     **kwargs,
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
     """运行BPE训练流程
     Args:
-        input_path: 数据集路径，支持✅ 1. 字符串路径(str) ✅ 2. 路径对象(实现了 os.PathLike 协议的对象)
+        documents: 文档字符串列表（已预先分好，每个元素是一篇完整文档）
         vocab_size: 目标词汇表大小
         special_tokens: 特殊token列表
         num_processes: 并行进程数
-        sample_size: 采样文档数量
     Returns:
-        vocab,merges: 词汇表和合并列表
+        vocab, merges: 词汇表和合并列表
     """
-
     # 参数验证
     base_vocab_size = 256 + len(special_tokens)
     if vocab_size < base_vocab_size:
         raise ValueError(f"vocab_size至少需{base_vocab_size}")
 
-    # 1. 字节到Unicode映射<bytes,str>
-    bytes_to_unicode_map = (
-        gpt2_bytes_to_unicode_local()
-    )  # {33: '!', 34: '"', ..., 255: 'ÿ'}
-    unicode_to_bytes_map = {
-        v: bytes([k]) for k, v in bytes_to_unicode_map.items()
-    }  # {!: b'!', ": b'"', ...,Ń: b'ÿ'}
+    # 1. 字节到Unicode映射
+    bytes_to_unicode_map = gpt2_bytes_to_unicode_local()
+    unicode_to_bytes_map = {v: bytes([k]) for k, v in bytes_to_unicode_map.items()}
 
     # 2. 初始化词汇表
     vocab = {i: bytes([i]) for i in range(256)}
@@ -336,35 +352,20 @@ def run_train_bpe(
             existing_bytes.add(st_bytes)
             next_token_id += 1
 
-    # 4. 加载并采样数据
-    print(f"📖 从 {input_path} 加载并采样 {sample_size} 个文档...")
-    # 将文档由UTF-8格式读取解码为字符串
-    text = load_and_sample_data(input_path, sample_size, special_tokens[0])
-
-    # 5. 分割文档
-
-    # re.escape() 不改变字符串的语义内容，但确保它们在正则表达式中被当作‌字面字符串‌处理，
-    # 避免被解释为正则元字符，比如re.escape('abcdef') 会返回 'abc\*def'
-    escaped_tokens = [re.escape(st) for st in special_tokens]
-    split_pattern = "|".join(escaped_tokens)  # <\\|endoftext\\|>|<pad>|<unk>
-
-    # 使用正则表达式分割文本为文档列表
-    documents = [part for part in re.split(split_pattern, text) if part]
-
-    # 6. 并行预分词
-    # 预分词格式str(UTF-8)形如: [['H', 'e', 'l', 'l', 'o'],[','],[' ', 'w', 'o', 'r', 'l', 'd'],['!']]
+    # 4. 并行预分词
+    print(f"📖 文档数量: {len(documents):,}")
     print("预分词调用线程数:", num_processes)
     sequences = parallel_pre_tokenize(documents, num_processes, bytes_to_unicode_map)
     print(f"✅ 预分词完成，得到 {len(sequences):,} 个token序列")
 
-    # 7. 初始化索引结构
+    # 5. 初始化索引结构
     print("🔧 构建BPE索引...")
     bpe_index = BPEIndex(sequences)
     merges = []
     vocab_progress = len(vocab)
     total_merges = vocab_size - vocab_progress
 
-    # 8. BPE训练主循环
+    # 6. BPE训练主循环
     print(f"🔄 开始BPE训练，目标合并数: {total_merges:,}")
     progress_bar = tqdm(
         total=total_merges, desc="训练BPE", unit="合并", mininterval=0.5
@@ -404,13 +405,18 @@ def run_train_bpe(
 
 
 def evaluate_tokenizer(
-    vocab: Dict[int, bytes], merges: List[Tuple[bytes, bytes]], test_text: str
+    vocab: Dict[int, bytes], merges: List[Tuple[bytes, bytes]], test_texts: List[str]
 ):
-    """简单评估分词器效果"""
+    """简单评估分词器效果
+    test_texts: 用于评估的文本列表（List[str]），会展示第一个样例的预览
+    """
     print("\n🔍 分词器评估")
-    sample_text = test_text[:200] + "..." if len(test_text) > 200 else test_text
+    if test_texts and len(test_texts) > 0:
+        first = test_texts[0]
+        sample_text = first[:200] + "..." if len(first) > 200 else first
+    else:
+        sample_text = ""
     print(f"样例文本: {sample_text}")
-
     # 更详尽的统计与重复检查
     import statistics
 
@@ -460,39 +466,59 @@ def evaluate_tokenizer(
 
 
 if __name__ == "__main__":
+    import sys
+
+    if not hasattr(sys.modules["__main__"], "__spec__"):
+        sys.modules["__main__"].__spec__ = None
+
     # 配置参数
     config = {
-        "vocab_size": 10000,
-        "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
+        "vocab_size": global_config.config["vocab_size"],
+        "special_tokens": global_config.config["special_tokens"],
         "num_processes": max(1, MAX_PROCESSES - 1),
-        "sample_size": 22000,  # 初始采样22,000文档
+        # 从OpenWebText中采样训练文档数
+        "train_sample_size": 500000,  # 根据需要调整，OpenWebText很大，建议先取小样本
+        "valid_sample_size": 5000,  # 验证集采样数
     }
+    # ========== 1. 使用 Hugging Face OpenWebText 数据集 ==========
+    print("🚀 加载 OpenWebText 数据集...")
+    dataset = load_dataset("sytelus/openwebtext")
 
-    # 数据集路径
-    train_path = "./data/TinyStoriesV2-GPT4-train.txt"
-    valid_path = "./data/TinyStoriesV2-GPT4-valid.txt"
+    # 准备训练文档
+    train_docs = prepare_documents_from_dataset(
+        dataset,
+        split="train",
+        sample_size=config["train_sample_size"],
+        text_column="text",
+    )
 
-    # 检查文件是否存在
-    if not Path(train_path).exists():
-        raise FileNotFoundError(f"训练集文件 {train_path} 不存在")
-    if not Path(valid_path).exists():
-        raise FileNotFoundError(f"验证集文件 {valid_path} 不存在")
+    # 准备验证文档（从同一个数据集中再采样一部分作为验证）
+    valid_docs = prepare_documents_from_dataset(
+        dataset,
+        split="train",
+        sample_size=config["valid_sample_size"],
+        text_column="text",
+    )
 
-    # 训练模型
-    print("🚀 开始训练")
+    # 训练BPE
+    print("\n🚀 开始训练（OpenWebText）")
     start_time = time.time()
-
-    train_vocab, train_merges = run_train_bpe(train_path, **config)
-
+    train_vocab, train_merges = run_train_bpe(
+        train_docs,
+        vocab_size=config["vocab_size"],
+        special_tokens=config["special_tokens"],
+        num_processes=config["num_processes"],
+    )
     print(f"\n✅ 训练完成! 耗时: {time.time() - start_time:.2f}秒")
 
-    # 小规模验证 (使用验证集的10%)
-    print("\n🔬 小规模验证")
-    valid_config = config.copy()
-    valid_config["sample_size"] = int(500)  # 验证集使用500文档 (10%)
-
-    valid_vocab, valid_merges = run_train_bpe(valid_path, **valid_config)
-
+    # 验证
+    print("\n🔬 小规模验证（OpenWebText）")
+    valid_vocab, valid_merges = run_train_bpe(
+        valid_docs,
+        vocab_size=config["vocab_size"],
+        special_tokens=config["special_tokens"],
+        num_processes=config["num_processes"],
+    )
     # 分析结果
     print("\n📊 训练结果")
     print(f"训练词汇表大小: {len(train_vocab):,}")
@@ -507,9 +533,7 @@ if __name__ == "__main__":
     print(f"\n📈 词汇表重叠率: {len(overlap)/len(train_tokens):.1%}")
 
     # 加载验证集样例进行评估
-    with open(valid_path, "r", encoding="utf-8") as f:
-        valid_text = f.read(1000)  # 读取前1000字符用于评估
-    evaluate_tokenizer(train_vocab, train_merges, valid_text)
+    evaluate_tokenizer(train_vocab, train_merges, valid_docs)
 
     import json  # 需要导入json模块
 
@@ -538,7 +562,7 @@ if __name__ == "__main__":
                 f.write(f"{b64_t1} {b64_t2}\n")
 
     # 在main函数中调用保存功能（在训练完成后）
-    output_dir = "./out"  # 修改为您的输出目录
+    output_dir = global_config.config["data_dir"]
     os.makedirs(output_dir, exist_ok=True)
 
     vocab_path = os.path.join(output_dir, "gpt2_vocab.json")

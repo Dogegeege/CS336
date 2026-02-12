@@ -24,7 +24,7 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 config = {
     # 实验配置
     "experiment_name": f"tinystories_17M_{timestamp}",
-    "total_tokens_processed": 327680000,
+    "total_tokens_processed": 9040017095,
     # 数据配置
     "train_data_path": "./data/TinyStoriesV2-GPT4-train.txt",
     "valid_data_path": "./data/TinyStoriesV2-GPT4-valid.txt",
@@ -33,11 +33,12 @@ config = {
     "train_encode_ids_path": "./Experiments/data/encoded_ids_train.pkl",  # 训练数据编码后的保存路径
     "valid_encode_ids_path": "./Experiments/data/encoded_ids_valid.pkl",  # 验证数据编码后的保存路径
     "checkpoint_dir": "./Experiments/data/checkpoints",
+    "data_dir": "./Experiments/data",
     "log_dir": "./Experiments/logs",
     # 编码器配置
     "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
     # 模型配置
-    "vocab_size": 10000,
+    "vocab_size": 50257,  # openwebtxt
     "context_length": 256,
     "d_model": 512,
     "d_ff": 1344,

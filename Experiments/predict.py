@@ -113,6 +113,8 @@ def predict():
 
 
 if __name__ == "__main__":
-    # predict()
-    tokenizer = Tokenizer(config)
-    print(tokenizer.encode("upon"))
+    predict()
+    # tokenizer = Tokenizer(config)
+    # encode = tokenizer.encode("upon")
+    # print(encode)
+    # print(tokenizer.decode(encode))
