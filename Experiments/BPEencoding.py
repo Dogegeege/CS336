@@ -477,7 +477,7 @@ if __name__ == "__main__":
         "special_tokens": global_config.config["special_tokens"],
         "num_processes": max(1, MAX_PROCESSES - 1),
         # 从OpenWebText中采样训练文档数
-        "train_sample_size": 500000,  # 根据需要调整，OpenWebText很大，建议先取小样本
+        "train_sample_size": 100000,  # 根据需要调整，OpenWebText很大，建议先取小样本
         "valid_sample_size": 5000,  # 验证集采样数
     }
     # ========== 1. 使用 Hugging Face OpenWebText 数据集 ==========
