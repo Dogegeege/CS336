@@ -260,7 +260,7 @@ def train():
                 start_step = 0
 
             with tqdm(
-                range(start_step, args.train_steps),
+                range(start_step, config.get("train_steps", 0)),
                 desc=f"🔄Epoch {epoch}",
                 unit="step",
             ) as tbar:

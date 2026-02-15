@@ -82,12 +82,12 @@ class BPETokenizer:
                 line = line.strip()
                 if not line:
                     continue
-            parts = line.split()
-            if len(parts) == 2:
-                b64_t1, b64_t2 = parts
-                t1 = base64.b64decode(b64_t1)
-                t2 = base64.b64decode(b64_t2)
-                merges.append((t1, t2))
+                parts = line.split()
+                if len(parts) == 2:
+                    b64_t1, b64_t2 = parts
+                    t1 = base64.b64decode(b64_t1)
+                    t2 = base64.b64decode(b64_t2)
+                    merges.append((t1, t2))
         return merges
 
     def _bytes_to_unicode_str(self, byte_seq: bytes) -> str:
@@ -254,7 +254,7 @@ if __name__ == "__main__":
     print("🚀 加载训练好的分词器...")
     tokenizer = BPETokenizer(config, vocab_path, merges_path)
     print("✅ 分词器加载成功!")
-
+    print(f"词汇表大小: {len(tokenizer.vocab)} tokens")
     # 测试文本
     test_texts = [
         "Wow, that is great",

@@ -24,7 +24,7 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 config = {
     # 实验配置
     "experiment_name": f"tinystories_17M_{timestamp}",
-    "total_tokens_processed": 9040017095,
+    "total_tokens_processed": 81920000,  # （你的 batch size × 总训练步数 × 上下文长度 应大致等于该值）
     # 数据配置
     "train_data_path": "./data/TinyStoriesV2-GPT4-train.txt",
     "valid_data_path": "./data/TinyStoriesV2-GPT4-valid.txt",
@@ -39,10 +39,10 @@ config = {
     "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
     # 模型配置
     "vocab_size": 50257,  # openwebtxt
-    "context_length": 256,
-    "d_model": 512,
-    "d_ff": 1344,
-    "n_layers": 4,
+    "context_length": 1024,
+    "d_model": 768,
+    "d_ff": 2048,
+    "n_layers": 16,
     "n_heads": 16,
     "rope_theta": 10000.0,
     # 训练配置
