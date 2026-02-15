@@ -42,7 +42,7 @@ config = {
     "context_length": 1024,
     "d_model": 768,
     "d_ff": 2048,
-    "n_layers": 16,
+    "n_layers": 6,  # d_model / n_layer = 128
     "n_heads": 16,
     "rope_theta": 10000.0,
     # 训练配置
