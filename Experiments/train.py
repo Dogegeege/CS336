@@ -398,7 +398,7 @@ def train():
                 log_file.flush()
 
             # 验证
-            if (epoch + 1) % config["val_interval"] == 0 and False:
+            if (epoch + 1) % config["val_interval"] == 0:
                 print(f"🔍开始验证...")
                 model.eval()
                 with torch.no_grad():

@@ -66,6 +66,6 @@ config = {
     "train_steps": train_steps,
     # 日志和检查点配置
     "log_interval": 5,
-    "val_interval": 40,
+    "val_interval": 41,
     "checkpoint_interval": 5,
 }
