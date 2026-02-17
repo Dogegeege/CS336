@@ -495,7 +495,7 @@ if __name__ == "__main__":
     # 准备验证文档（从同一个数据集中再采样一部分作为验证）
     valid_docs = prepare_documents_from_dataset(
         dataset,
-        split="train",
+        split="valid",
         sample_size=config["valid_sample_size"],
         text_column="text",
     )

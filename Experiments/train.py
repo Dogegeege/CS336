@@ -7,6 +7,14 @@ import pickle
 import os
 import glob
 import random
+import torch
+import torch.nn.utils as nn_utils
+
+# 提升 cudnn 性能（若输入尺寸恒定）
+try:
+    torch.backends.cudnn.benchmark = True
+except Exception:
+    pass
 
 
 def atomic_save(state, path):
@@ -21,18 +29,22 @@ def find_latest_checkpoint(dir_path):
     final = os.path.join(dir_path, "model_final_*.pth")
     final_files = glob.glob(final)
     if final_files:
+        print(f"使用 final 模型{final_files[0]}")
         final_files.sort(key=os.path.getmtime, reverse=True)
         return final_files[0]
 
     latest = os.path.join(dir_path, "latest.pth")
     if os.path.exists(latest):
+        print(f"使用最新训练模型{latest}")
         return latest
 
     # 否则查找其他 checkpoint
     files = glob.glob(os.path.join(dir_path, "model_epoch_*.pth"))
     if not files:
+        print(f"无训练模型{final_files}")
         return None
     files.sort(key=os.path.getmtime, reverse=True)
+    print(f"使用其它训练模型{final_files}")
     return files[0]
 
 
@@ -179,6 +191,12 @@ def train():
         config["vocab_size"],
         device,
     ).to(device)
+    # 编译模型（仅当 PyTorch 版本支持且需要时）
+    try:
+        model = torch.compile(model)
+        print("编译模型成功")
+    except Exception as e:
+        print(f"编译模型失败, 使用原始模型. Error: {e}")
 
     # 加载优化器和学习率调度器
     lr_scheduler = CosineSchedule(
@@ -194,6 +212,19 @@ def train():
         config["eps"],
         config["weight_decay"],
     )
+
+    # AMP 与梯度累积设置
+    use_amp = bool(config.get("use_amp", True)) and torch.cuda.is_available()
+    grad_accum_steps = int(config.get("grad_accum_steps", 1))
+    # GradScaler: prefer new location `torch.amp.GradScaler` if available,
+    # otherwise fall back to `torch.cuda.amp.GradScaler` for older torch versions.
+    GradScalerCls = None
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        GradScalerCls = torch.amp.GradScaler
+    else:
+        GradScalerCls = getattr(torch.cuda.amp, "GradScaler", None)
+
+    scaler = GradScalerCls() if (use_amp and GradScalerCls is not None) else None
 
     # 加载损失函数
     loss_fn = CrossEntropyLoss()
@@ -211,7 +242,7 @@ def train():
     print(f"📅日志时间戳: {timestamp}")
     print(f"💻训练设备: {device}")
     print(f"验证间隔批次: {config['val_interval']} epochs")
-
+ 
     # 如果检测到已有 checkpoint，切换为恢复模式并将日志以追加模式打开
     ckpt = load_checkpoint_if_exists(model, optimizer, lr_scheduler)
     if ckpt is not None:
@@ -269,24 +300,63 @@ def train():
                     new_lr = lr_scheduler(global_step)
                     for param_group in optimizer.param_groups:
                         param_group["lr"] = new_lr
-
                     x, y = train_data_loader.get_train_batch_data()
                     x = x.to(device)
                     y = y.to(device)
-                    logits = model(x)
-                    loss = (
-                        loss_fn(logits, y)
-                        if callable(loss_fn)
-                        else loss_fn.forward(logits, y)
-                    )
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    global_step += 1
 
-                    tbar.set_postfix(
-                        {"loss": f"{loss.item():.6f}", "学习率": f"{new_lr:.6f}"}
-                    )
+                    # 在累积周期开始时清零梯度
+                    micro_step_index = (step - start_step) % grad_accum_steps
+                    if micro_step_index == 0:
+                        optimizer.zero_grad()
+
+                    # 前向与反向（可选 AMP）
+                    with torch.autocast(device_type="cuda", enabled=use_amp):
+                        logits = model(x)
+                        loss_val = (
+                            loss_fn(logits, y)
+                            if callable(loss_fn)
+                            else loss_fn.forward(logits, y)
+                        )
+
+                    # 将 loss 平均到每个累积步骤上
+                    loss = loss_val / float(grad_accum_steps)
+
+                    if scaler is not None:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
+
+                    # 在累积步结束时更新参数
+                    is_last_micro_step = (micro_step_index == (grad_accum_steps - 1))
+                    is_final_step = step == config.get("train_steps", 0) - 1
+                    if is_last_micro_step or is_final_step:
+                        # 梯度裁剪（在 unscale 之后）
+                        if scaler is not None:
+                            # unscale (method name differs across versions)
+                            unscale_fn = getattr(scaler, "unscale_", getattr(scaler, "unscale", None))
+                            if unscale_fn is not None:
+                                unscale_fn(optimizer)
+
+                            nn_utils.clip_grad_norm_(model.parameters(), config.get("grad_clip", 1.0))
+
+                            try:
+                                step_fn = getattr(scaler, "step", None)
+                                if step_fn is not None:
+                                    step_fn(optimizer)
+                                update_fn = getattr(scaler, "update", None)
+                                if update_fn is not None:
+                                    update_fn()
+                            except Exception as e:
+                                print(f"AMP step failed: {e}")
+                                raise
+                        else:
+                            nn_utils.clip_grad_norm_(model.parameters(), config.get("grad_clip", 1.0))
+                            optimizer.step()
+
+                        global_step += 1
+
+                    # 使用未缩放的 loss_val 进行显示
+                    tbar.set_postfix({"loss": f"{loss_val.item():.6f}", "学习率": f"{new_lr:.6f}"})
                     tbar.update()
 
                     # 定期打印与写日志
@@ -298,7 +368,10 @@ def train():
             # epoch 结束后写一次 epoch 完成日志
             log_message = f"Epoch {epoch} completed with loss: {loss.item():.6f}"
             print(log_message)
-            print(f"💾日志已保存至📁 {log_file_path}\n")
+            print(f"💾日志已保存至📁 {log_file_path}")
+            print(f"显存分配: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
+            print(f"显存缓存: {torch.cuda.memory_reserved()/1024**3:.2f}GB\n")
+   
             log_file.write(log_message + "\n")
             log_file.flush()
 
@@ -325,7 +398,7 @@ def train():
                 log_file.flush()
 
             # 验证
-            if (epoch + 1) % config["val_interval"] == 0:
+            if (epoch + 1) % config["val_interval"] == 0 and False:
                 print(f"🔍开始验证...")
                 model.eval()
                 with torch.no_grad():
