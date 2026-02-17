@@ -477,12 +477,12 @@ if __name__ == "__main__":
         "special_tokens": global_config.config["special_tokens"],
         "num_processes": max(1, MAX_PROCESSES - 1),
         # 从OpenWebText中采样训练文档数
-        "train_sample_size": 10000,  # 根据需要调整，OpenWebText很大，建议先取小样本
-        "valid_sample_size": 500,  # 验证集采样数
+        "train_sample_size": global_config.config["train_sample_size"],
+        "valid_sample_size": global_config.config["valid_sample_size"]
     }
     # ========== 1. 使用 Hugging Face OpenWebText 数据集 ==========
     print("🚀 加载 OpenWebText 数据集...")
-    dataset = load_dataset("sytelus/openwebtext")
+    dataset = load_dataset("sytelus/openwebtext", split=f"train[:{config["train_sample_size"]}]")
 
     # 准备训练文档
     train_docs = prepare_documents_from_dataset(
