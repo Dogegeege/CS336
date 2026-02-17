@@ -361,12 +361,12 @@ def train():
 
                     # 定期打印与写日志
                     if step % 100 == 0:
-                        log_message = f"Epoch {epoch} Step {step} LR {new_lr:.6f} Loss: {loss.item():.6f} (global_step={global_step})"
+                        log_message = f"Epoch {epoch} Step {step} LR {new_lr:.6f} Loss: {loss_val.item():.6f} (global_step={global_step})"
                         log_file.write(log_message + "\n")
                         log_file.flush()
 
             # epoch 结束后写一次 epoch 完成日志
-            log_message = f"Epoch {epoch} completed with loss: {loss.item():.6f}"
+            log_message = f"Epoch {epoch} completed with loss: {loss_val.item():.6f}"
             print(log_message)
             print(f"💾日志已保存至📁 {log_file_path}")
             print(f"显存分配: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
