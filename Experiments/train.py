@@ -38,10 +38,16 @@ def find_latest_checkpoint(dir_path):
         print(f"使用最新训练模型{latest}")
         return latest
 
+    interrupt = os.path.join(dir_path, "*.pth")
+    interrupt_files=glob.glob(interrupt)
+    if interrupt_files:
+        print(f"使用最后一次中断训练模型{interrupt_files[0]}")
+        return interrupt_files[0]
+
     # 否则查找其他 checkpoint
     files = glob.glob(os.path.join(dir_path, "model_epoch_*.pth"))
     if not files:
-        print(f"无训练模型{final_files}")
+        print(f"无训练模型")
         return None
     files.sort(key=os.path.getmtime, reverse=True)
     print(f"使用其它训练模型{final_files}")
@@ -400,6 +406,8 @@ def train():
             # 验证
             if (epoch + 1) % config["val_interval"] == 0:
                 print(f"🔍开始验证...")
+                print(f"验证{len(valid_data_loader)}")
+
                 model.eval()
                 with torch.no_grad():
                     val_loss = 0.0

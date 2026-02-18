@@ -6,7 +6,7 @@ import torch
 
 class Args:
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    epochs = 40
+    epochs = 50
     train_steps = 5000
     batch_size = 32
 
@@ -66,6 +66,6 @@ config = {
     "train_steps": train_steps,
     # 日志和检查点配置
     "log_interval": 5,
-    "val_interval": 41,
+    "val_interval": 51,
     "checkpoint_interval": 5,
 }
