@@ -179,12 +179,15 @@ def train():
         # 或者设置空的数据加载器
         # train_data_loader = None
         # valid_data_loader = None
+
     train_data_loader = DataLoader(
         train_encode_ids, config["batch_size"], config["context_length"], shuffle=True
     )
     valid_data_loader = DataLoader(
         valid_encode_ids, config["batch_size"], config["context_length"], shuffle=True
     )
+    print(f"✅已加载训练数据: {len(train_encode_ids)} tokens, 验证数据: {len(valid_encode_ids)} tokens")
+
 
     # 加载模型
     model = TransformerModule(
@@ -248,7 +251,8 @@ def train():
     print(f"📅日志时间戳: {timestamp}")
     print(f"💻训练设备: {device}")
     print(f"验证间隔批次: {config['val_interval']} epochs")
- 
+    print(f"训练批次：{config["epochs"]}\n")
+
     # 如果检测到已有 checkpoint，切换为恢复模式并将日志以追加模式打开
     ckpt = load_checkpoint_if_exists(model, optimizer, lr_scheduler)
     if ckpt is not None:

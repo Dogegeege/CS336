@@ -6,7 +6,7 @@ import torch
 
 class Args:
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    epochs = 50
+    epochs = 80
     train_steps = 5000
     batch_size = 32
 
@@ -38,7 +38,7 @@ config = {
     # 编码器配置
     "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
     "train_sample_size": 1000000,  # 根据需要调整，OpenWebText很大，建议先取小样本
-    "valid_sample_size": 1000,  # 验证集采样数
+    "valid_sample_size": 100,  # 验证集采样数
     # 模型配置768
     "vocab_size": 50257,  # openwebtxt
     "context_length": 512,
@@ -66,6 +66,6 @@ config = {
     "train_steps": train_steps,
     # 日志和检查点配置
     "log_interval": 5,
-    "val_interval": 51,
+    "val_interval": 50,
     "checkpoint_interval": 5,
 }
