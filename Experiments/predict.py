@@ -11,7 +11,9 @@ try:
     omp_val = os.environ.get("OMP_NUM_THREADS")
     if omp_val is None or omp_val == "" or omp_val == "0":
         os.environ["OMP_NUM_THREADS"] = str(max(1, (os.cpu_count() or 1)))
-        print(f"设置 OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']} (避免 libgomp 错误)")
+        print(
+            f"设置 OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']} (避免 libgomp 错误)"
+        )
 except Exception:
     pass
 
@@ -108,9 +110,11 @@ def predict():
         try:
             # 尝试显式允许 numpy 的重构函数（若需要）以支持安全加载
             try:
-                torch.serialization.add_safe_globals([
-                    np._core.multiarray._reconstruct,
-                ])
+                torch.serialization.add_safe_globals(
+                    [
+                        np._core.multiarray._reconstruct,
+                    ]
+                )
             except Exception:
                 # 若 add_safe_globals 不可用或失败，继续并在需要时回退
                 pass
@@ -124,7 +128,9 @@ def predict():
             except Exception:
                 # 如果上面失败，再次尝试更宽松的加载方式（不安全但对可信 checkpoint 有用）
                 try:
-                    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+                    ckpt = torch.load(
+                        ckpt_path, map_location=device, weights_only=False
+                    )
                 except Exception as e_inner:
                     raise e_inner
 
@@ -155,7 +161,9 @@ def predict():
                     except Exception as e2:
                         raise e_ld from e2
             else:
-                print(f"Checkpoint {ckpt_path} 没有包含 'model_state_dict'，使用随机初始化模型")
+                print(
+                    f"Checkpoint {ckpt_path} 没有包含 'model_state_dict'，使用随机初始化模型"
+                )
         except Exception as e:
             print(f"无法加载 checkpoint {ckpt_path}: {e}. 使用随机初始化模型")
     else:
@@ -163,16 +171,16 @@ def predict():
     model.eval()
 
     tokenizer = Tokenizer(config)
-    input_text = "A four-year old Texas boy found wandering across the border in Mexico this winter finally returned to the United States. Authorities believe his mother traveled from El Paso to Juarez to purposely abandon the child." \
-    "Over the weekend, the El Paso Police Department announced that the youngster found in the Mexican state of Chihuahua returned to the United States on Friday night. The four-year-old remained in the custody of social services in Juarez for more than four months."
-    # input_text = "It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of Light, it was the season of darkness, it was the spring of hope, it was the winter of despair."
+    # input_text = "A four-year old Texas boy found wandering across the border in Mexico this winter finally returned to the United States. Authorities believe his mother traveled from El Paso to Juarez to purposely abandon the child." \
+    # "Over the weekend, the El Paso Police Department announced that the youngster found in the Mexican state of Chihuahua returned to the United States on Friday night. The four-year-old remained in the custody of social services in Juarez for more than four months."
+    input_text = "It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of Light, it was the season of darkness, it was the spring of hope, it was the winter of despair."
     # input_text = "baby shark"
 
     input_ids = tokenizer.encode(input_text)
     input_ids = torch.tensor(input_ids, dtype=torch.long).to(device)
 
     # 推理
-    output_ids = decode_token(input_ids, model, max_tokens_to_generate=512)
+    output_ids = decode_token(input_ids, model, max_tokens_to_generate=256)
     # print(output_ids)
 
     output_ids_list = output_ids[0].cpu().tolist()
