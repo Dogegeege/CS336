@@ -37,13 +37,13 @@ config = {
     "log_dir": "./Experiments/logs",
     # 编码器配置
     "special_tokens": ["<|endoftext|>", "<pad>", "<unk>"],
-    "train_sample_size": 100000,  # 根据需要调整，OpenWebText很大，建议先取小样本
+    "train_sample_size": 1000000,  # 根据需要调整，OpenWebText很大，建议先取小样本
     "valid_sample_size": 1000,  # 验证集采样数
     # 模型配置768
     "vocab_size": 50257,  # openwebtxt
     "context_length": 512,
     "d_model": 768,
-    "d_ff": 3072,   # ✅ 关键修正：4*d_model（原1024严重不足）
+    "d_ff": 3072,  # ✅ 关键修正：4*d_model（原1024严重不足）
     "n_layers": 12,  # d_model / n_layer = 64
     "n_heads": 12,
     "rope_theta": 10000.0,
