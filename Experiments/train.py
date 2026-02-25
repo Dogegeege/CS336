@@ -39,7 +39,7 @@ def find_latest_checkpoint(dir_path):
         return latest
 
     interrupt = os.path.join(dir_path, "*.pth")
-    interrupt_files=glob.glob(interrupt)
+    interrupt_files = glob.glob(interrupt)
     if interrupt_files:
         print(f"使用最后一次中断训练模型{interrupt_files[0]}")
         return interrupt_files[0]
@@ -186,8 +186,9 @@ def train():
     valid_data_loader = DataLoader(
         valid_encode_ids, config["batch_size"], config["context_length"], shuffle=True
     )
-    print(f"✅已加载训练数据: {len(train_encode_ids)} tokens, 验证数据: {len(valid_encode_ids)} tokens")
-
+    print(
+        f"✅已加载训练数据: {len(train_encode_ids)} tokens, 验证数据: {len(valid_encode_ids)} tokens"
+    )
 
     # 加载模型
     model = TransformerModule(
@@ -251,7 +252,7 @@ def train():
     print(f"📅日志时间戳: {timestamp}")
     print(f"💻训练设备: {device}")
     print(f"验证间隔批次: {config['val_interval']} epochs")
-    print(f"训练批次：{config["epochs"]}\n")
+    print(f"训练批次：{config['epochs']}\n")
 
     # 如果检测到已有 checkpoint，切换为恢复模式并将日志以追加模式打开
     ckpt = load_checkpoint_if_exists(model, optimizer, lr_scheduler)
@@ -337,17 +338,21 @@ def train():
                         loss.backward()
 
                     # 在累积步结束时更新参数
-                    is_last_micro_step = (micro_step_index == (grad_accum_steps - 1))
+                    is_last_micro_step = micro_step_index == (grad_accum_steps - 1)
                     is_final_step = step == config.get("train_steps", 0) - 1
                     if is_last_micro_step or is_final_step:
                         # 梯度裁剪（在 unscale 之后）
                         if scaler is not None:
                             # unscale (method name differs across versions)
-                            unscale_fn = getattr(scaler, "unscale_", getattr(scaler, "unscale", None))
+                            unscale_fn = getattr(
+                                scaler, "unscale_", getattr(scaler, "unscale", None)
+                            )
                             if unscale_fn is not None:
                                 unscale_fn(optimizer)
 
-                            nn_utils.clip_grad_norm_(model.parameters(), config.get("grad_clip", 1.0))
+                            nn_utils.clip_grad_norm_(
+                                model.parameters(), config.get("grad_clip", 1.0)
+                            )
 
                             try:
                                 step_fn = getattr(scaler, "step", None)
@@ -360,13 +365,17 @@ def train():
                                 print(f"AMP step failed: {e}")
                                 raise
                         else:
-                            nn_utils.clip_grad_norm_(model.parameters(), config.get("grad_clip", 1.0))
+                            nn_utils.clip_grad_norm_(
+                                model.parameters(), config.get("grad_clip", 1.0)
+                            )
                             optimizer.step()
 
                         global_step += 1
 
                     # 使用未缩放的 loss_val 进行显示
-                    tbar.set_postfix({"loss": f"{loss_val.item():.6f}", "学习率": f"{new_lr:.6f}"})
+                    tbar.set_postfix(
+                        {"loss": f"{loss_val.item():.6f}", "学习率": f"{new_lr:.6f}"}
+                    )
                     tbar.update()
 
                     # 定期打印与写日志
@@ -381,7 +390,7 @@ def train():
             print(f"💾日志已保存至📁 {log_file_path}")
             print(f"显存分配: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
             print(f"显存缓存: {torch.cuda.memory_reserved()/1024**3:.2f}GB\n")
-   
+
             log_file.write(log_message + "\n")
             log_file.flush()
 
