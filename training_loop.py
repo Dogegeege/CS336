@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch
 import time
+import torch.cuda.nvtx as nvtx
 
 __all__ = [
     "save_checkpoint",
@@ -20,9 +21,9 @@ n_head = 2  # 少量注意力头
 n_layer = 2  # 少量层
 context_length = 16  # 很短的上下文
 batch_size = 8  # 小批量
-max_iters = 50  # 极少的迭代次数
+max_iters = 500  # 极少的迭代次数
 learning_rate = 0.01
-device = "cpu"  # 明确使用CPU
+device = "cuda:0"
 
 
 def get_batch(
@@ -134,6 +135,7 @@ class NanoTransformer(nn.Module):
         )
         self.head = nn.Linear(n_embd, vocab_size)
 
+    @nvtx.range("前向传播")
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -143,11 +145,16 @@ class NanoTransformer(nn.Module):
             logits: 输出预测张量 (batch_size, context_length, vocab_size)
         """
         B, T = idx.shape
-        token_emb = self.token_embedding(idx)
-        pos_emb = self.position_embedding(torch.arange(T, device=idx.device))
-        x = token_emb + pos_emb
-        x = self.blocks(x)
-        logits = self.head(x)
+        with nvtx.range("词汇嵌入"):
+            token_emb = self.token_embedding(idx)
+        with nvtx.range("位置嵌入"):
+            pos_emb = self.position_embedding(torch.arange(T, device=idx.device))
+        with nvtx.range("混合位置"):
+            x = token_emb + pos_emb
+        with nvtx.range("Transfomer块"):
+            x = self.blocks(x)
+        with nvtx.range("输出"):
+            logits = self.head(x)
         return logits
 
 
